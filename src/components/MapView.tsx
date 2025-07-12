@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -39,8 +40,13 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
       map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
 
       map.current.on('load', () => {
+        console.log('Map loaded successfully');
         setIsMapReady(true);
         updateMapWithRoute();
+      });
+
+      map.current.on('error', (e) => {
+        console.error('Map error:', e);
       });
 
       return () => {
@@ -53,12 +59,18 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
 
   useEffect(() => {
     if (isMapReady && routeSession) {
+      console.log('Updating map with route data');
       updateMapWithRoute();
     }
   }, [routeSession, currentAddressIndex, completedAddresses, isMapReady]);
 
   const updateMapWithRoute = () => {
-    if (!map.current || !routeSession) return;
+    if (!map.current || !routeSession) {
+      console.log('Map or route session not available');
+      return;
+    }
+
+    console.log('Starting map update with route:', routeSession);
 
     // Clear existing markers and routes
     const markers = document.querySelectorAll('.mapboxgl-marker');
@@ -73,18 +85,29 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
     const addresses = routeSession.addresses;
     const optimizedOrder = routeSession.optimizedOrder;
     
-    if (addresses.length === 0) return;
+    if (addresses.length === 0) {
+      console.log('No addresses to display');
+      return;
+    }
+
+    console.log('Processing', addresses.length, 'addresses in order:', optimizedOrder);
 
     // Add markers for each address
     const bounds = new mapboxgl.LngLatBounds();
+    const routeCoordinates: [number, number][] = [];
     
     optimizedOrder.forEach((addressIndex, orderIndex) => {
       const address = addresses[addressIndex];
-      if (!address.coordinates) return;
+      if (!address.coordinates) {
+        console.log('Address has no coordinates:', address);
+        return;
+      }
 
       const [lat, lng] = address.coordinates;
       const isCompleted = completedAddresses.has(address.id);
       const isCurrent = orderIndex === currentAddressIndex;
+
+      console.log(`Adding marker for address ${orderIndex + 1}:`, address.street, address.houseNumber, 'at', [lat, lng]);
 
       // Create marker element
       const markerEl = document.createElement('div');
@@ -135,51 +158,65 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
         .addTo(map.current!);
 
       bounds.extend([lng, lat]);
+      routeCoordinates.push([lng, lat]);
     });
 
-    // Create route line
-    if (optimizedOrder.length > 1) {
-      const routeCoordinates = optimizedOrder
-        .map(addressIndex => {
-          const address = addresses[addressIndex];
-          if (!address.coordinates) return null;
-          const [lat, lng] = address.coordinates;
-          return [lng, lat];
-        })
-        .filter(coord => coord !== null);
-
-      if (routeCoordinates.length > 1) {
-        map.current.addSource('route', {
-          type: 'geojson',
-          data: {
-            type: 'Feature',
-            properties: {},
-            geometry: {
-              type: 'LineString',
-              coordinates: routeCoordinates
-            }
+    // Create walking route line
+    if (routeCoordinates.length > 1) {
+      console.log('Creating route line with', routeCoordinates.length, 'points');
+      
+      map.current.addSource('route', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: routeCoordinates
           }
-        });
+        }
+      });
 
-        map.current.addLayer({
-          id: 'route',
-          type: 'line',
-          source: 'route',
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round'
-          },
-          paint: {
-            'line-color': '#3b82f6',
-            'line-width': 3,
-            'line-opacity': 0.8
-          }
-        });
-      }
+      map.current.addLayer({
+        id: 'route',
+        type: 'line',
+        source: 'route',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#3b82f6',
+          'line-width': 4,
+          'line-opacity': 0.8,
+          'line-dasharray': [2, 2] // Dashed line for walking route
+        }
+      });
+
+      // Add arrow symbols along the route to show direction
+      map.current.addLayer({
+        id: 'route-arrows',
+        type: 'symbol',
+        source: 'route',
+        layout: {
+          'symbol-placement': 'line',
+          'text-field': '▶',
+          'text-size': 16,
+          'text-spacing': 100,
+          'text-rotation-alignment': 'map',
+          'symbol-spacing': 100
+        },
+        paint: {
+          'text-color': '#3b82f6',
+          'text-halo-color': 'white',
+          'text-halo-width': 1
+        }
+      });
     }
 
-    // Fit map to show all markers
+    // Fit map to show all markers with padding
     if (!bounds.isEmpty()) {
+      console.log('Fitting map to bounds');
       map.current.fitBounds(bounds, {
         padding: 50,
         maxZoom: 16
@@ -191,27 +228,45 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
     if (!map.current) return;
 
     setIsLocating(true);
+    console.log('Attempting to get current location');
 
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
+          console.log('Got current location:', latitude, longitude);
           
+          // Clear any existing current location markers
+          const existingMarkers = document.querySelectorAll('.current-location-marker');
+          existingMarkers.forEach(marker => marker.remove());
+
           map.current?.flyTo({
             center: [longitude, latitude],
-            zoom: 14,
+            zoom: 15,
             duration: 2000
           });
 
           // Add a marker for current location
           const currentLocationMarker = document.createElement('div');
           currentLocationMarker.className = 'current-location-marker';
-          currentLocationMarker.style.width = '20px';
-          currentLocationMarker.style.height = '20px';
+          currentLocationMarker.style.width = '16px';
+          currentLocationMarker.style.height = '16px';
           currentLocationMarker.style.borderRadius = '50%';
           currentLocationMarker.style.backgroundColor = '#ef4444';
           currentLocationMarker.style.border = '3px solid white';
           currentLocationMarker.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+          currentLocationMarker.style.animation = 'pulse 2s infinite';
+
+          // Add CSS for pulse animation
+          const style = document.createElement('style');
+          style.textContent = `
+            @keyframes pulse {
+              0% { transform: scale(1); opacity: 1; }
+              50% { transform: scale(1.2); opacity: 0.7; }
+              100% { transform: scale(1); opacity: 1; }
+            }
+          `;
+          document.head.appendChild(style);
 
           new mapboxgl.Marker(currentLocationMarker)
             .setLngLat([longitude, latitude])
