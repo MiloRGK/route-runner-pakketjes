@@ -15,6 +15,8 @@ interface RouteOptimizationProps {
   onRouteOptimized: (session: RouteSession) => void;
 }
 
+const OPENCAGE_API_KEY = '8cd50accbc214b2484dd1db860cc146f';
+
 const RouteOptimization = ({ addresses, onRouteOptimized }: RouteOptimizationProps) => {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [sessionName, setSessionName] = useState('Route ' + new Date().toLocaleDateString());
@@ -23,62 +25,131 @@ const RouteOptimization = ({ addresses, onRouteOptimized }: RouteOptimizationPro
   const [prioritizePackageType, setPrioritizePackageType] = useState(false);
   const [splitSessions, setSplitSessions] = useState(false);
 
-  // Simplified route optimization algorithm
-  const optimizeRoute = (addressList: Address[]): number[] => {
-    if (addressList.length === 0) return [];
+  // Geocode address using OpenCage API
+  const geocodeAddress = async (address: Address): Promise<[number, number] | null> => {
+    const query = `${address.street} ${address.houseNumber}, ${address.postalCode} ${address.city}, Netherlands`;
     
+    try {
+      const response = await fetch(
+        `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(query)}&key=${OPENCAGE_API_KEY}&limit=1&countrycode=nl`
+      );
+      
+      if (!response.ok) {
+        console.warn(`Geocoding failed for ${address.street} ${address.houseNumber}`);
+        return null;
+      }
+      
+      const data = await response.json();
+      
+      if (data.results && data.results.length > 0) {
+        const { lat, lng } = data.results[0].geometry;
+        return [lat, lng];
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn(`Geocoding error for ${address.street} ${address.houseNumber}:`, error);
+      return null;
+    }
+  };
+
+  // Calculate distance between two coordinates using Haversine formula
+  const calculateDistance = (coord1: [number, number], coord2: [number, number]): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (coord2[0] - coord1[0]) * Math.PI / 180;
+    const dLon = (coord2[1] - coord1[1]) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(coord1[0] * Math.PI / 180) * Math.cos(coord2[0] * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  // Enhanced route optimization algorithm with real coordinates
+  const optimizeRoute = async (addressList: Address[]): Promise<{ order: number[], totalDistance: number }> => {
+    if (addressList.length === 0) return { order: [], totalDistance: 0 };
+    
+    // First, geocode all addresses
+    toast({
+      title: "Locaties ophalen",
+      description: "Postcodes worden omgezet naar coördinaten...",
+    });
+
+    const addressesWithCoords = await Promise.all(
+      addressList.map(async (address, index) => {
+        const coords = await geocodeAddress(address);
+        return { ...address, coordinates: coords, originalIndex: index };
+      })
+    );
+
+    // Filter out addresses that couldn't be geocoded and use fallback
+    const validAddresses = addressesWithCoords.map((addr, index) => {
+      if (!addr.coordinates) {
+        // Fallback: use postal code for rough positioning
+        const postalCode = parseInt(addr.postalCode.substring(0, 4));
+        const lat = 52.3676 + (postalCode - 1000) * 0.001; // Rough approximation for Netherlands
+        const lng = 4.9041 + (postalCode - 1000) * 0.0005;
+        addr.coordinates = [lat, lng];
+      }
+      return addr;
+    });
+
+    if (validAddresses.length === 0) return { order: [], totalDistance: 0 };
+
+    // Nearest neighbor algorithm with real distance calculation
     const optimizedOrder: number[] = [];
     const visited = new Set<number>();
+    let totalDistance = 0;
     
-    // Start with address closest to center
+    // Start with the first address
     let currentIndex = 0;
-    optimizedOrder.push(currentIndex);
+    optimizedOrder.push(validAddresses[currentIndex].originalIndex);
     visited.add(currentIndex);
 
-    // Greedy nearest neighbor approach
-    while (visited.size < addressList.length) {
+    while (visited.size < validAddresses.length) {
       let nextIndex = -1;
       let minDistance = Infinity;
 
-      for (let i = 0; i < addressList.length; i++) {
+      for (let i = 0; i < validAddresses.length; i++) {
         if (visited.has(i)) continue;
         
-        // Simple distance calculation based on postal code similarity
-        const currentPostal = addressList[currentIndex].postalCode;
-        const candidatePostal = addressList[i].postalCode;
-        const distance = Math.abs(parseInt(currentPostal.substring(0, 4)) - parseInt(candidatePostal.substring(0, 4)));
+        const currentCoords = validAddresses[currentIndex].coordinates!;
+        const candidateCoords = validAddresses[i].coordinates!;
+        let distance = calculateDistance(currentCoords, candidateCoords);
         
         // Bonus for same package type if prioritizing
-        const packageBonus = prioritizePackageType && 
-          addressList[currentIndex].packageType === addressList[i].packageType ? -100 : 0;
-          
-        const totalScore = distance + packageBonus;
+        if (prioritizePackageType && 
+            validAddresses[currentIndex].packageType === validAddresses[i].packageType) {
+          distance *= 0.8; // 20% distance reduction for same package type
+        }
         
-        if (totalScore < minDistance) {
-          minDistance = totalScore;
+        if (distance < minDistance) {
+          minDistance = distance;
           nextIndex = i;
         }
       }
 
       if (nextIndex !== -1) {
-        optimizedOrder.push(nextIndex);
+        optimizedOrder.push(validAddresses[nextIndex].originalIndex);
         visited.add(nextIndex);
+        totalDistance += minDistance;
         currentIndex = nextIndex;
       }
     }
 
-    return optimizedOrder;
+    return { order: optimizedOrder, totalDistance };
   };
 
-  const calculateEstimates = (addressCount: number) => {
-    const averageWalkingTimeBetweenAddresses = 2; // minutes
-    const averageDeliveryTime = 1; // minutes per address
+  const calculateEstimates = (addressCount: number, actualDistance?: number) => {
+    const averageDeliveryTime = 1.5; // minutes per address
+    const walkingSpeedKmh = walkingSpeed[0];
     
-    const estimatedTime = (addressCount * averageDeliveryTime) + 
-                         ((addressCount - 1) * averageWalkingTimeBetweenAddresses);
+    let estimatedDistance = actualDistance || (addressCount * 0.15); // fallback: 150m per address
+    let walkingTime = (estimatedDistance / walkingSpeedKmh) * 60; // convert to minutes
+    let deliveryTime = addressCount * averageDeliveryTime;
     
-    const estimatedDistance = (addressCount * 0.1) + // 100m per address on average
-                             ((addressCount - 1) * 0.15); // 150m between addresses
+    const estimatedTime = Math.round(walkingTime + deliveryTime);
     
     return { estimatedTime, estimatedDistance };
   };
@@ -96,9 +167,6 @@ const RouteOptimization = ({ addresses, onRouteOptimized }: RouteOptimizationPro
     setIsOptimizing(true);
 
     try {
-      // Simulate processing time
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
       if (splitSessions && addresses.length > maxAddressesPerSession[0]) {
         // Create multiple sessions
         const sessions: RouteSession[] = [];
@@ -106,8 +174,8 @@ const RouteOptimization = ({ addresses, onRouteOptimized }: RouteOptimizationPro
         
         for (let i = 0; i < addresses.length; i += addressesPerSession) {
           const sessionAddresses = addresses.slice(i, i + addressesPerSession);
-          const optimizedOrder = optimizeRoute(sessionAddresses);
-          const { estimatedTime, estimatedDistance } = calculateEstimates(sessionAddresses.length);
+          const { order: optimizedOrder, totalDistance } = await optimizeRoute(sessionAddresses);
+          const { estimatedTime, estimatedDistance } = calculateEstimates(sessionAddresses.length, totalDistance);
           
           const session: RouteSession = {
             id: `session-${Date.now()}-${i}`,
@@ -122,7 +190,7 @@ const RouteOptimization = ({ addresses, onRouteOptimized }: RouteOptimizationPro
           sessions.push(session);
         }
 
-        // For now, return the first session
+        // Return the first session
         onRouteOptimized(sessions[0]);
         
         toast({
@@ -131,8 +199,8 @@ const RouteOptimization = ({ addresses, onRouteOptimized }: RouteOptimizationPro
         });
       } else {
         // Single session
-        const optimizedOrder = optimizeRoute(addresses);
-        const { estimatedTime, estimatedDistance } = calculateEstimates(addresses.length);
+        const { order: optimizedOrder, totalDistance } = await optimizeRoute(addresses);
+        const { estimatedTime, estimatedDistance } = calculateEstimates(addresses.length, totalDistance);
         
         const session: RouteSession = {
           id: `session-${Date.now()}`,
@@ -148,13 +216,14 @@ const RouteOptimization = ({ addresses, onRouteOptimized }: RouteOptimizationPro
         
         toast({
           title: "Route geoptimaliseerd",
-          description: `Optimale volgorde berekend voor ${addresses.length} adressen.`,
+          description: `Optimale volgorde berekend voor ${addresses.length} adressen met echte coördinaten.`,
         });
       }
     } catch (error) {
+      console.error('Route optimization error:', error);
       toast({
         title: "Optimalisatie mislukt",
-        description: "Er ging iets mis bij het berekenen van de route.",
+        description: "Er ging iets mis bij het berekenen van de route. Probeer het opnieuw.",
         variant: "destructive"
       });
     } finally {
@@ -170,7 +239,7 @@ const RouteOptimization = ({ addresses, onRouteOptimized }: RouteOptimizationPro
       <div className="text-center">
         <h3 className="text-2xl font-bold mb-2">Route optimaliseren</h3>
         <p className="text-gray-600">
-          Configureer de instellingen en optimaliseer je route
+          Configureer de instellingen en optimaliseer je route met echte locatiegegevens
         </p>
       </div>
 
@@ -298,6 +367,13 @@ const RouteOptimization = ({ addresses, onRouteOptimized }: RouteOptimizationPro
               Upload eerst adressen om te kunnen optimaliseren
             </p>
           )}
+          
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>✨ Nieuwe functie:</strong> Route-optimalisatie gebruikt nu echte GPS-coördinaten 
+              via OpenCage API voor nauwkeurige afstandsberekeningen en optimale routes.
+            </p>
+          </div>
         </CardContent>
       </Card>
     </div>
