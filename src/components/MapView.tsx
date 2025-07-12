@@ -19,6 +19,7 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
   const map = useRef<mapboxgl.Map | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const currentLocationMarker = useRef<mapboxgl.Marker | null>(null);
 
   // Hardcoded Mapbox token
   const MAPBOX_TOKEN = 'pk.eyJ1IjoicnV1ZGplcm9vZCIsImEiOiJjbWQwOGx5c3YwdXR3MmtzangwMGJzMWRlIn0.9ReKdp1YmmgNAD3uoqv5xg';
@@ -73,13 +74,17 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
     console.log('Starting map update with route:', routeSession);
 
     // Clear existing markers and routes
-    const markers = document.querySelectorAll('.mapboxgl-marker');
+    const markers = document.querySelectorAll('.mapboxgl-marker:not(.current-location-marker)');
     markers.forEach(marker => marker.remove());
 
     // Remove existing route layer if it exists
     if (map.current.getSource('route')) {
-      map.current.removeLayer('route-arrows');
-      map.current.removeLayer('route');
+      if (map.current.getLayer('route-arrows')) {
+        map.current.removeLayer('route-arrows');
+      }
+      if (map.current.getLayer('route')) {
+        map.current.removeLayer('route');
+      }
       map.current.removeSource('route');
     }
 
@@ -93,14 +98,27 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
 
     console.log('Processing', addresses.length, 'addresses in order:', optimizedOrder);
 
-    // Add markers for each address
+    // Check if any addresses have coordinates
+    const addressesWithCoordinates = addresses.filter(addr => addr.coordinates && addr.coordinates.length === 2);
+    
+    if (addressesWithCoordinates.length === 0) {
+      console.log('No addresses have coordinates. Showing notice.');
+      toast({
+        title: "Geen coördinaten beschikbaar",
+        description: "De adressen hebben geen GPS-coördinaten. Gebruik de geocoding functie om coördinaten toe te voegen.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Add markers for each address with coordinates
     const bounds = new mapboxgl.LngLatBounds();
     const routeCoordinates: [number, number][] = [];
     
     optimizedOrder.forEach((addressIndex, orderIndex) => {
       const address = addresses[addressIndex];
-      if (!address.coordinates) {
-        console.log('Address has no coordinates:', address);
+      if (!address.coordinates || address.coordinates.length !== 2) {
+        console.log('Address has no valid coordinates:', address);
         return;
       }
 
@@ -112,7 +130,7 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
 
       // Create marker element
       const markerEl = document.createElement('div');
-      markerEl.className = 'custom-marker';
+      markerEl.className = 'address-marker';
       markerEl.style.width = '32px';
       markerEl.style.height = '32px';
       markerEl.style.borderRadius = '50%';
@@ -236,39 +254,47 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
           const { latitude, longitude } = position.coords;
           console.log('Got current location:', latitude, longitude);
           
-          // Clear any existing current location markers
-          const existingMarkers = document.querySelectorAll('.current-location-marker');
-          existingMarkers.forEach(marker => marker.remove());
+          // Remove existing current location marker
+          if (currentLocationMarker.current) {
+            currentLocationMarker.current.remove();
+          }
 
+          // Fly to current location
           map.current?.flyTo({
             center: [longitude, latitude],
             zoom: 15,
             duration: 2000
           });
 
-          // Add a marker for current location
-          const currentLocationMarker = document.createElement('div');
-          currentLocationMarker.className = 'current-location-marker';
-          currentLocationMarker.style.width = '16px';
-          currentLocationMarker.style.height = '16px';
-          currentLocationMarker.style.borderRadius = '50%';
-          currentLocationMarker.style.backgroundColor = '#ef4444';
-          currentLocationMarker.style.border = '3px solid white';
-          currentLocationMarker.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
-          currentLocationMarker.style.animation = 'pulse 2s infinite';
+          // Create current location marker element
+          const currentLocationEl = document.createElement('div');
+          currentLocationEl.className = 'current-location-marker';
+          currentLocationEl.style.width = '20px';
+          currentLocationEl.style.height = '20px';
+          currentLocationEl.style.borderRadius = '50%';
+          currentLocationEl.style.backgroundColor = '#ef4444';
+          currentLocationEl.style.border = '3px solid white';
+          currentLocationEl.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+          
+          // Add pulse animation
+          currentLocationEl.style.animation = 'pulse 2s infinite';
+          
+          // Ensure CSS animation is available
+          if (!document.querySelector('#pulse-animation-style')) {
+            const style = document.createElement('style');
+            style.id = 'pulse-animation-style';
+            style.textContent = `
+              @keyframes pulse {
+                0% { transform: scale(1); opacity: 1; }
+                50% { transform: scale(1.2); opacity: 0.7; }
+                100% { transform: scale(1); opacity: 1; }
+              }
+            `;
+            document.head.appendChild(style);
+          }
 
-          // Add CSS for pulse animation
-          const style = document.createElement('style');
-          style.textContent = `
-            @keyframes pulse {
-              0% { transform: scale(1); opacity: 1; }
-              50% { transform: scale(1.2); opacity: 0.7; }
-              100% { transform: scale(1); opacity: 1; }
-            }
-          `;
-          document.head.appendChild(style);
-
-          new mapboxgl.Marker(currentLocationMarker)
+          // Create and add the marker
+          currentLocationMarker.current = new mapboxgl.Marker(currentLocationEl)
             .setLngLat([longitude, latitude])
             .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML('<div style="padding: 4px; font-weight: bold;">Uw huidige locatie</div>'))
             .addTo(map.current!);
