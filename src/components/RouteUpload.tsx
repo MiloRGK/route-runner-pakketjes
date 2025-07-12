@@ -1,4 +1,3 @@
-
 import { useState, useRef } from 'react';
 import { Upload, FileText, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -8,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Address } from '@/pages/Index';
 import { toast } from '@/hooks/use-toast';
+import AddressAutocomplete from './AddressAutocomplete';
 
 interface RouteUploadProps {
   onAddressesUploaded: (addresses: Address[]) => void;
@@ -22,6 +22,7 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
     city: '',
     packageType: 1 as 1 | 2
   });
+  const [searchQuery, setSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -77,6 +78,22 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
     }
   };
 
+  const handleAddressSelect = (addressData: {
+    street: string;
+    houseNumber: string;
+    postalCode: string;
+    city: string;
+    coordinates: [number, number];
+  }) => {
+    setNewAddress({
+      street: addressData.street,
+      houseNumber: addressData.houseNumber,
+      postalCode: addressData.postalCode,
+      city: addressData.city,
+      packageType: newAddress.packageType
+    });
+  };
+
   const addManualAddress = () => {
     if (!newAddress.street || !newAddress.houseNumber || !newAddress.postalCode || !newAddress.city) {
       toast({
@@ -100,6 +117,7 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
       city: '',
       packageType: 1
     });
+    setSearchQuery('');
 
     toast({
       title: "Adres toegevoegd",
@@ -174,7 +192,7 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
         </CardContent>
       </Card>
 
-      {/* Manual Entry */}
+      {/* Manual Entry with Autocomplete */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center">
@@ -182,10 +200,22 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
             Handmatig toevoegen
           </CardTitle>
           <CardDescription>
-            Voeg individuele adressen toe aan je route
+            Zoek en voeg individuele adressen toe aan je route
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Address Search */}
+          <div className="mb-4">
+            <AddressAutocomplete
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onAddressSelect={handleAddressSelect}
+              placeholder="Zoek adres (bijv. Hoofdstraat 123, Amsterdam)"
+              label="Adres zoeken"
+            />
+          </div>
+
+          {/* Manual Input Fields */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
               <Label htmlFor="street">Straatnaam</Label>
