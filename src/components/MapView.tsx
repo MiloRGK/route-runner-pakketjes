@@ -1,11 +1,11 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { MapPin, Navigation, Eye, EyeOff } from 'lucide-react';
+import { MapPin, Navigation, Eye, EyeOff, Locate } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Address, RouteSession } from '@/pages/Index';
+import { toast } from '@/hooks/use-toast';
 
 interface MapViewProps {
   routeSession: RouteSession | null;
@@ -17,6 +17,7 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
 
   // Hardcoded Mapbox token
   const MAPBOX_TOKEN = 'pk.eyJ1IjoicnV1ZGplcm9vZCIsImEiOiJjbWQwOGx5c3YwdXR3MmtzangwMGJzMWRlIn0.9ReKdp1YmmgNAD3uoqv5xg';
@@ -186,6 +187,68 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
     }
   };
 
+  const centerOnCurrentLocation = () => {
+    if (!map.current) return;
+
+    setIsLocating(true);
+
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          
+          map.current?.flyTo({
+            center: [longitude, latitude],
+            zoom: 14,
+            duration: 2000
+          });
+
+          // Add a marker for current location
+          const currentLocationMarker = document.createElement('div');
+          currentLocationMarker.className = 'current-location-marker';
+          currentLocationMarker.style.width = '20px';
+          currentLocationMarker.style.height = '20px';
+          currentLocationMarker.style.borderRadius = '50%';
+          currentLocationMarker.style.backgroundColor = '#ef4444';
+          currentLocationMarker.style.border = '3px solid white';
+          currentLocationMarker.style.boxShadow = '0 2px 4px rgba(0,0,0,0.3)';
+
+          new mapboxgl.Marker(currentLocationMarker)
+            .setLngLat([longitude, latitude])
+            .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML('<div style="padding: 4px; font-weight: bold;">Uw huidige locatie</div>'))
+            .addTo(map.current!);
+
+          setIsLocating(false);
+          toast({
+            title: "Locatie gevonden",
+            description: "Kaart gecentreerd op uw huidige locatie",
+          });
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          setIsLocating(false);
+          toast({
+            title: "Locatie niet beschikbaar",
+            description: "Kon uw huidige locatie niet bepalen. Controleer uw browser instellingen.",
+            variant: "destructive"
+          });
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        }
+      );
+    } else {
+      setIsLocating(false);
+      toast({
+        title: "Geolocation niet ondersteund",
+        description: "Uw browser ondersteunt geen locatieservices.",
+        variant: "destructive"
+      });
+    }
+  };
+
   if (!routeSession) {
     return (
       <div className="text-center py-12">
@@ -200,6 +263,15 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Route kaart</h3>
+        <Button 
+          onClick={centerOnCurrentLocation}
+          disabled={isLocating}
+          variant="outline"
+          size="sm"
+        >
+          <Locate className="w-4 h-4 mr-2" />
+          {isLocating ? 'Locatie zoeken...' : 'Huidige locatie'}
+        </Button>
       </div>
       
       <Card>
