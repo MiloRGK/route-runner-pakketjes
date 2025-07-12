@@ -5,8 +5,6 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { MapPin, Navigation, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Address, RouteSession } from '@/pages/Index';
 
 interface MapViewProps {
@@ -18,15 +16,16 @@ interface MapViewProps {
 const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapViewProps) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const [mapboxToken, setMapboxToken] = useState('');
-  const [showTokenInput, setShowTokenInput] = useState(true);
   const [isMapReady, setIsMapReady] = useState(false);
 
+  // Hardcoded Mapbox token
+  const MAPBOX_TOKEN = 'pk.eyJ1IjoicnV1ZGplcm9vZCIsImEiOiJjbWQwOGx5c3YwdXR3MmtzangwMGJzMWRlIn0.9ReKdp1YmmgNAD3uoqv5xg';
+
   useEffect(() => {
-    if (!mapboxToken || !mapContainer.current || !routeSession) return;
+    if (!mapContainer.current || !routeSession) return;
 
     // Initialize map
-    mapboxgl.accessToken = mapboxToken;
+    mapboxgl.accessToken = MAPBOX_TOKEN;
     
     try {
       map.current = new mapboxgl.Map({
@@ -49,7 +48,7 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
     } catch (error) {
       console.error('Error initializing map:', error);
     }
-  }, [mapboxToken, routeSession]);
+  }, [routeSession]);
 
   useEffect(() => {
     if (isMapReady && routeSession) {
@@ -187,13 +186,6 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
     }
   };
 
-  const handleTokenSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (mapboxToken.trim()) {
-      setShowTokenInput(false);
-    }
-  };
-
   if (!routeSession) {
     return (
       <div className="text-center py-12">
@@ -206,82 +198,34 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
 
   return (
     <div className="space-y-4">
-      {showTokenInput && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <MapPin className="w-5 h-5 mr-2" />
-              Mapbox configuratie
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleTokenSubmit} className="space-y-4">
-              <div>
-                <Label htmlFor="mapbox-token">Mapbox Public Token</Label>
-                <Input
-                  id="mapbox-token"
-                  type="text"
-                  value={mapboxToken}
-                  onChange={(e) => setMapboxToken(e.target.value)}
-                  placeholder="pk.eyJ1IjoieW91ci11c2VybmFtZSIsImEiOiJjbGV..."
-                  className="font-mono text-sm"
-                />
-                <p className="text-sm text-gray-600 mt-1">
-                  Krijg je token van{' '}
-                  <a href="https://mapbox.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                    mapbox.com
-                  </a>
-                </p>
-              </div>
-              <Button type="submit" disabled={!mapboxToken.trim()}>
-                <Navigation className="w-4 h-4 mr-2" />
-                Kaart laden
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      )}
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Route kaart</h3>
+      </div>
+      
+      <Card>
+        <CardContent className="p-0">
+          <div 
+            ref={mapContainer} 
+            className="w-full h-96 rounded-lg"
+            style={{ minHeight: '400px' }}
+          />
+        </CardContent>
+      </Card>
 
-      {!showTokenInput && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Route kaart</h3>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowTokenInput(true)}
-            >
-              {showTokenInput ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              Token wijzigen
-            </Button>
-          </div>
-          
-          <Card>
-            <CardContent className="p-0">
-              <div 
-                ref={mapContainer} 
-                className="w-full h-96 rounded-lg"
-                style={{ minHeight: '400px' }}
-              />
-            </CardContent>
-          </Card>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs">📍</div>
-              <span>Huidig adres</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center text-white text-xs">✓</div>
-              <span>Voltooid</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-4 h-4 bg-gray-500 rounded-full flex items-center justify-center text-white text-xs">#</div>
-              <span>Te doen</span>
-            </div>
-          </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <div className="flex items-center space-x-2">
+          <div className="w-4 h-4 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs">📍</div>
+          <span>Huidig adres</span>
         </div>
-      )}
+        <div className="flex items-center space-x-2">
+          <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center text-white text-xs">✓</div>
+          <span>Voltooid</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <div className="w-4 h-4 bg-gray-500 rounded-full flex items-center justify-center text-white text-xs">#</div>
+          <span>Te doen</span>
+        </div>
+      </div>
     </div>
   );
 };
