@@ -13,6 +13,8 @@ interface AddressSuggestion {
     city?: string;
     town?: string;
     village?: string;
+    municipality?: string;
+    neighbourhood?: string;
   };
   geometry: {
     lat: number;
@@ -57,14 +59,65 @@ const AddressAutocomplete = ({
 
     setIsLoading(true);
     try {
-      const response = await fetch(
-        `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(query)}&key=8cd50accbc214b2484dd1db860cc146f&countrycode=nl&limit=5&no_annotations=1`
-      );
-      
-      if (response.ok) {
-        const data = await response.json();
-        setSuggestions(data.results || []);
+      // Probeer verschillende zoekstrategieën
+      const searchQueries = [
+        query, // Originele query
+        query.replace(/\s+/g, '+'), // Spaties vervangen door +
+        query + ', Nederland', // Nederland toevoegen
+      ];
+
+      let allResults: AddressSuggestion[] = [];
+
+      for (const searchQuery of searchQueries) {
+        console.log('Searching for:', searchQuery);
+        
+        const response = await fetch(
+          `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(searchQuery)}&key=8cd50accbc214b2484dd1db860cc146f&countrycode=nl&limit=10&no_annotations=1&language=nl`
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Search results for', searchQuery, ':', data.results?.length || 0, 'results');
+          
+          if (data.results && data.results.length > 0) {
+            // Filter duplicaten op basis van formatted adres
+            const newResults = data.results.filter((result: AddressSuggestion) => 
+              !allResults.some(existing => existing.formatted === result.formatted)
+            );
+            allResults = [...allResults, ...newResults];
+            
+            // Stop als we genoeg resultaten hebben
+            if (allResults.length >= 5) break;
+          }
+        }
       }
+
+      // Extra zoekopdracht zonder huisnummer als we weinig resultaten hebben
+      if (allResults.length < 3) {
+        const words = query.split(' ');
+        if (words.length > 1) {
+          const streetOnly = words.slice(0, -1).join(' '); // Laatste woord (mogelijk huisnummer) weglaten
+          console.log('Searching street only:', streetOnly);
+          
+          const response = await fetch(
+            `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(streetOnly)}&key=8cd50accbc214b2484dd1db860cc146f&countrycode=nl&limit=5&no_annotations=1&language=nl`
+          );
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.results) {
+              const newResults = data.results.filter((result: AddressSuggestion) => 
+                !allResults.some(existing => existing.formatted === result.formatted)
+              );
+              allResults = [...allResults, ...newResults];
+            }
+          }
+        }
+      }
+
+      console.log('Total unique results:', allResults.length);
+      setSuggestions(allResults.slice(0, 8)); // Maximaal 8 resultaten tonen
+      
     } catch (error) {
       console.error('Error searching addresses:', error);
       setSuggestions([]);
@@ -98,7 +151,15 @@ const AddressAutocomplete = ({
     const street = components.road || '';
     const houseNumber = components.house_number || '';
     const postalCode = components.postcode || '';
-    const city = components.city || components.town || components.village || '';
+    const city = components.city || components.town || components.village || components.municipality || '';
+
+    console.log('Selected address components:', {
+      street,
+      houseNumber,
+      postalCode,
+      city,
+      coordinates: [suggestion.geometry.lng, suggestion.geometry.lat]
+    });
 
     onChange(suggestion.formatted);
     onAddressSelect({
@@ -162,6 +223,15 @@ const AddressAutocomplete = ({
               <span className="text-sm">{suggestion.formatted}</span>
             </button>
           ))}
+        </div>
+      )}
+      
+      {showSuggestions && !isLoading && suggestions.length === 0 && value.length >= 3 && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg p-3">
+          <div className="text-sm text-gray-500 flex items-center space-x-2">
+            <MapPin className="w-4 h-4" />
+            <span>Geen adressen gevonden voor "{value}"</span>
+          </div>
         </div>
       )}
     </div>
