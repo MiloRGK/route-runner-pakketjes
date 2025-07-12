@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Upload, FileText, Plus, Trash2 } from 'lucide-react';
+import { Upload, FileText, Plus, Trash2, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,8 @@ interface RouteUploadProps {
   onAddressesUploaded: (addresses: Address[]) => void;
 }
 
+const OPENCAGE_API_KEY = '8cd50accbc214b2484dd1db860cc146f';
+
 const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [newAddress, setNewAddress] = useState({
@@ -20,9 +22,11 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
     houseNumber: '',
     postalCode: '',
     city: '',
-    packageType: 1 as 1 | 2
+    packageType: 1 as 1 | 2,
+    coordinates: undefined as [number, number] | undefined
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [isGeocodingAll, setIsGeocodingAll] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -90,8 +94,80 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
       houseNumber: addressData.houseNumber,
       postalCode: addressData.postalCode,
       city: addressData.city,
-      packageType: newAddress.packageType
+      packageType: newAddress.packageType,
+      coordinates: addressData.coordinates
     });
+  };
+
+  const geocodeAddress = async (address: Address): Promise<[number, number] | null> => {
+    const query = `${address.street} ${address.houseNumber}, ${address.postalCode} ${address.city}, Netherlands`;
+    
+    try {
+      const response = await fetch(
+        `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(query)}&key=${OPENCAGE_API_KEY}&limit=1&countrycode=nl`
+      );
+      
+      if (!response.ok) return null;
+      
+      const data = await response.json();
+      
+      if (data.results && data.results.length > 0) {
+        const { lat, lng } = data.results[0].geometry;
+        return [lat, lng];
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn(`Geocoding error for ${address.street} ${address.houseNumber}:`, error);
+      return null;
+    }
+  };
+
+  const geocodeAllAddresses = async () => {
+    if (addresses.length === 0) {
+      toast({
+        title: "Geen adressen",
+        description: "Er zijn geen adressen om te geocoderen.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsGeocodingAll(true);
+    
+    try {
+      const updatedAddresses = await Promise.all(
+        addresses.map(async (address) => {
+          if (address.coordinates) {
+            return address; // Skip if already has coordinates
+          }
+          
+          const coords = await geocodeAddress(address);
+          return {
+            ...address,
+            coordinates: coords || undefined
+          };
+        })
+      );
+
+      const geocodedCount = updatedAddresses.filter(addr => addr.coordinates).length;
+      
+      setAddresses(updatedAddresses);
+      
+      toast({
+        title: "Geocoding voltooid",
+        description: `${geocodedCount} van ${addresses.length} adressen hebben nu coördinaten.`,
+      });
+    } catch (error) {
+      console.error('Geocoding error:', error);
+      toast({
+        title: "Geocoding mislukt",
+        description: "Er ging iets mis bij het ophalen van coördinaten.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsGeocodingAll(false);
+    }
   };
 
   const addManualAddress = () => {
@@ -106,7 +182,12 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
 
     const address: Address = {
       id: `addr-${Date.now()}`,
-      ...newAddress
+      street: newAddress.street,
+      houseNumber: newAddress.houseNumber,
+      postalCode: newAddress.postalCode,
+      city: newAddress.city,
+      packageType: newAddress.packageType,
+      coordinates: newAddress.coordinates
     };
 
     setAddresses([...addresses, address]);
@@ -115,13 +196,14 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
       houseNumber: '',
       postalCode: '',
       city: '',
-      packageType: 1
+      packageType: 1,
+      coordinates: undefined
     });
     setSearchQuery('');
 
     toast({
       title: "Adres toegevoegd",
-      description: `${address.street} ${address.houseNumber} is toegevoegd.`,
+      description: `${address.street} ${address.houseNumber} is toegevoegd${address.coordinates ? ' (met coördinaten)' : ''}.`,
     });
   };
 
@@ -145,6 +227,9 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
       description: `${addresses.length} adressen zijn klaar voor route-optimalisatie.`,
     });
   };
+
+  const addressesWithCoords = addresses.filter(addr => addr.coordinates).length;
+  const addressesWithoutCoords = addresses.length - addressesWithCoords;
 
   return (
     <div className="space-y-6">
@@ -282,17 +367,40 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
       {addresses.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Geüpload adressen ({addresses.length})</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle>Geüpload adressen ({addresses.length})</CardTitle>
+              {addressesWithoutCoords > 0 && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={geocodeAllAddresses}
+                  disabled={isGeocodingAll}
+                >
+                  <MapPin className="w-4 h-4 mr-2" />
+                  {isGeocodingAll ? 'Bezig...' : `Geocodeer ${addressesWithoutCoords} adressen`}
+                </Button>
+              )}
+            </div>
+            {addressesWithCoords > 0 && (
+              <CardDescription>
+                {addressesWithCoords} van {addresses.length} adressen hebben coördinaten
+              </CardDescription>
+            )}
           </CardHeader>
           <CardContent>
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {addresses.map((address) => (
                 <div key={address.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div className="flex-1">
-                    <span className="font-medium">
-                      {address.street} {address.houseNumber}
-                    </span>
-                    <span className="text-gray-600 ml-2">
+                    <div className="flex items-center">
+                      <span className="font-medium">
+                        {address.street} {address.houseNumber}
+                      </span>
+                      {address.coordinates && (
+                        <MapPin className="w-4 h-4 ml-2 text-green-600" />
+                      )}
+                    </div>
+                    <span className="text-gray-600">
                       {address.postalCode} {address.city}
                     </span>
                     <span className={`ml-2 px-2 py-1 text-xs rounded-full ${
