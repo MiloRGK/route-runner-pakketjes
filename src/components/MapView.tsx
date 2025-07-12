@@ -78,6 +78,7 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
 
     // Remove existing route layer if it exists
     if (map.current.getSource('route')) {
+      map.current.removeLayer('route-arrows');
       map.current.removeLayer('route');
       map.current.removeSource('route');
     }
@@ -202,9 +203,8 @@ const MapView = ({ routeSession, currentAddressIndex, completedAddresses }: MapV
           'symbol-placement': 'line',
           'text-field': '▶',
           'text-size': 16,
-          'text-spacing': 100,
-          'text-rotation-alignment': 'map',
-          'symbol-spacing': 100
+          'symbol-spacing': 100,
+          'text-rotation-alignment': 'map'
         },
         paint: {
           'text-color': '#3b82f6',
