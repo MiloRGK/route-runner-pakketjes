@@ -8,12 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Address } from '@/pages/Index';
 import { toast } from '@/hooks/use-toast';
 import AddressAutocomplete from './AddressAutocomplete';
+import { geocodingService } from '@/services/geocoding.service';
 
 interface RouteUploadProps {
   onAddressesUploaded: (addresses: Address[]) => void;
 }
-
-const OPENCAGE_API_KEY = '8cd50accbc214b2484dd1db860cc146f';
 
 const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -99,29 +98,7 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
     });
   };
 
-  const geocodeAddress = async (address: Address): Promise<[number, number] | null> => {
-    const query = `${address.street} ${address.houseNumber}, ${address.postalCode} ${address.city}, Netherlands`;
-    
-    try {
-      const response = await fetch(
-        `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(query)}&key=${OPENCAGE_API_KEY}&limit=1&countrycode=nl`
-      );
-      
-      if (!response.ok) return null;
-      
-      const data = await response.json();
-      
-      if (data.results && data.results.length > 0) {
-        const { lat, lng } = data.results[0].geometry;
-        return [lat, lng];
-      }
-      
-      return null;
-    } catch (error) {
-      console.warn(`Geocoding error for ${address.street} ${address.houseNumber}:`, error);
-      return null;
-    }
-  };
+  // Note: Geocoding is now handled by the geocoding service
 
   const geocodeAllAddresses = async () => {
     if (addresses.length === 0) {
@@ -136,28 +113,50 @@ const RouteUpload = ({ onAddressesUploaded }: RouteUploadProps) => {
     setIsGeocodingAll(true);
     
     try {
-      const updatedAddresses = await Promise.all(
-        addresses.map(async (address) => {
-          if (address.coordinates) {
-            return address; // Skip if already has coordinates
-          }
-          
-          const coords = await geocodeAddress(address);
+      // Filter addresses that need geocoding
+      const addressesToGeocode = addresses.filter(addr => !addr.coordinates);
+      
+      if (addressesToGeocode.length === 0) {
+        toast({
+          title: "Alle adressen hebben al coördinaten",
+          description: "Geen geocoding nodig.",
+        });
+        setIsGeocodingAll(false);
+        return;
+      }
+
+      const { results, errors } = await geocodingService.geocodeAddresses(addressesToGeocode);
+      
+      // Update addresses with geocoded coordinates
+      const updatedAddresses = addresses.map(address => {
+        if (address.coordinates) return address; // Already has coordinates
+        
+        const geocodeResult = results.get(address.id);
+        if (geocodeResult) {
           return {
             ...address,
-            coordinates: coords || undefined
+            coordinates: geocodeResult.coordinates
           };
-        })
-      );
+        }
+        return address;
+      });
 
       const geocodedCount = updatedAddresses.filter(addr => addr.coordinates).length;
       
       setAddresses(updatedAddresses);
       
-      toast({
-        title: "Geocoding voltooid",
-        description: `${geocodedCount} van ${addresses.length} adressen hebben nu coördinaten.`,
-      });
+      if (errors.length > 0) {
+        toast({
+          title: "Geocoding voltooid met waarschuwingen",
+          description: `${geocodedCount} van ${addresses.length} adressen hebben coördinaten. ${errors.length} adressen konden niet worden gevonden.`,
+          variant: "destructive"
+        });
+      } else {
+        toast({
+          title: "Geocoding voltooid",
+          description: `${geocodedCount} van ${addresses.length} adressen hebben nu coördinaten.`,
+        });
+      }
     } catch (error) {
       console.error('Geocoding error:', error);
       toast({

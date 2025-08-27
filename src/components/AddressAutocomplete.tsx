@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { MapPin, Loader2 } from 'lucide-react';
+import { ENV } from '@/config/env';
 
 interface AddressSuggestion {
   formatted: string;
@@ -72,7 +73,7 @@ const AddressAutocomplete = ({
         console.log('Searching for:', searchQuery);
         
         const response = await fetch(
-          `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(searchQuery)}&key=8cd50accbc214b2484dd1db860cc146f&countrycode=nl&limit=10&no_annotations=1&language=nl`
+          `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(searchQuery)}&key=${ENV.OPENCAGE_API_KEY}&countrycode=nl&limit=10&no_annotations=1&language=nl`
         );
         
         if (response.ok) {
@@ -100,7 +101,7 @@ const AddressAutocomplete = ({
           console.log('Searching street only:', streetOnly);
           
           const response = await fetch(
-            `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(streetOnly)}&key=8cd50accbc214b2484dd1db860cc146f&countrycode=nl&limit=5&no_annotations=1&language=nl`
+            `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(streetOnly)}&key=${ENV.OPENCAGE_API_KEY}&countrycode=nl&limit=5&no_annotations=1&language=nl`
           );
           
           if (response.ok) {
